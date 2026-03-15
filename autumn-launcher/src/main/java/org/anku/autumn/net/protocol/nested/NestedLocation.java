@@ -3,6 +3,7 @@ package org.anku.autumn.net.protocol.nested;
 import java.net.URL;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class NestedLocation {
@@ -51,10 +52,15 @@ public class NestedLocation {
     }
 
     @Override
-    public String toString() {
-        return "NestedLocation{" +
-                "path=" + path +
-                ", nestedEntryName='" + nestedEntryName + '\'' +
-                '}';
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        NestedLocation that = (NestedLocation) o;
+        return Objects.equals(path, that.path) && Objects.equals(nestedEntryName, that.nestedEntryName);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(path, nestedEntryName);
     }
 }

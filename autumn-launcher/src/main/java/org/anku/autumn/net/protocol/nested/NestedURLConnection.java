@@ -1,6 +1,6 @@
 package org.anku.autumn.net.protocol.nested;
 
-import org.anku.autumn.zip.ZipContent;
+import org.anku.autumn.net.protocol.jar.JarFiles;
 
 import java.io.File;
 import java.io.FilePermission;
@@ -8,62 +8,94 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLConnection;
-import java.nio.file.Files;
 import java.security.Permission;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
-public class NestedURLConnection extends URLConnection {
+public class NestedUrlConnection extends URLConnection {
 
     private static final DateTimeFormatter RFC_1123_DATE_TIME = DateTimeFormatter.RFC_1123_DATE_TIME
             .withZone(ZoneId.of("GMT"));
+    private static final String CONTENT_TYPE = "x-java/jar";
 
-    private volatile long size = -1;
-    private volatile InputStream inputStream;
-
-    private long lastModified = -1;
+    private final NestedLocation location;
+    private final JarFiles jarFiles;
+    private InputStream inputStream;
+    private long length = -1;
+    private long lastModified = 0;
     private FilePermission permission;
     private Map<String, List<String>> headerFields;
-    private final NestedLocation location;
 
-    protected NestedURLConnection(URL url) {
-        super(url);
-        this.location = NestedLocation.fromUrl(url);
+    /**
+     * Constructs a URL connection to the specified URL. A connection to
+     * the object referenced by the URL is not created.
+     *
+     * @param url the specified URL.
+     */
+    protected NestedUrlConnection(URL url) {
+        super(url); // url = nested:/path/myjar.jar/!BOOT-INF/lib/mylib.jar
+        jarFiles = JarFiles.instance;
+        location = NestedLocation.fromUrl(url); // location = {path=/path/myjar.jar, entry=BOOT-INF/lib/mylib.jar}
     }
 
     @Override
-    public String getHeaderField(String name) {
-        List<String> values = getHeaderFields().get(name);
-        return values != null && !values.isEmpty() ? values.getFirst() : null;
+    public int getContentLength() {
+        if (length <= Integer.MAX_VALUE) {
+            return (int) length;
+        }
+        return -1;
     }
 
     @Override
     public String getHeaderField(int n) {
-        Map.Entry<String, List<String>> entry = getHeaderFieldEntry(n);
-        List<String> values = entry != null ? entry.getValue() : null;
-        return values != null && !values.isEmpty() ? values.getFirst() : null;
+        Map.Entry<String, List<String>> entry = getHeaderFields()
+                .entrySet()
+                .stream()
+                .skip(n)
+                .findFirst()
+                .orElse(null);
+        return entry != null ? entry.getValue().getFirst() : null;
     }
 
     @Override
     public String getHeaderFieldKey(int n) {
-        Map.Entry<String, List<String>> entry = getHeaderFieldEntry(n);
+        Map.Entry<String, List<String>> entry = getHeaderFields()
+                .entrySet()
+                .stream()
+                .skip(n)
+                .findFirst()
+                .orElse(null);
         return entry != null ? entry.getKey() : null;
     }
 
-    private Map.Entry<String, List<String>> getHeaderFieldEntry(int n) {
-        Iterator<Map.Entry<String, List<String>>> iterator = getHeaderFields().entrySet().iterator();
-        Map.Entry<String, List<String>> entry = null;
-        for (int i = 0; i < n; i++) {
-            entry = iterator.hasNext() ? iterator.next() : null;
-        }
-        return entry;
+    @Override
+    public long getContentLengthLong() {
+        return length;
     }
+
+    @Override
+    public String getContentType() {
+        return CONTENT_TYPE;
+    }
+
+    @Override
+    public long getLastModified() {
+        return lastModified;
+    }
+
+    @Override
+    public String getHeaderField(String name) {
+        List<String> headerValues = getHeaderFields().get(name);
+        return headerValues != null && !headerValues.isEmpty() ? headerValues.getFirst() : null;
+    }
+
     @Override
     public Map<String, List<String>> getHeaderFields() {
         try {
@@ -74,49 +106,22 @@ public class NestedURLConnection extends URLConnection {
         if (headerFields == null) {
             Map<String, List<String>> headerFields = new LinkedHashMap<>();
             long contentLength = getContentLengthLong();
-            long lastModified = getLastModified();
+            long modificationTime = getLastModified();
             if (contentLength > 0) {
-                headerFields.put("content-length", List.of(String.valueOf(contentLength)));
+                headerFields.put(
+                        "content-length",
+                        Collections.singletonList(Long.toString(contentLength))
+                );
             }
-            if (lastModified > 0) {
-                headerFields.put("last-modified", List.of(RFC_1123_DATE_TIME.format(Instant.ofEpochMilli(lastModified))));
+            if (modificationTime > 0) {
+                headerFields.put(
+                        "last-modified",
+                        List.of(RFC_1123_DATE_TIME.format(Instant.ofEpochMilli(modificationTime)))
+                );
             }
-            this.headerFields = Collections.unmodifiableMap(headerFields);
+            this.headerFields = headerFields;
         }
         return headerFields;
-    }
-
-    @Override
-    public int getContentLength() {
-        long contentLengthLong = getContentLengthLong();
-        return contentLengthLong < Integer.MAX_VALUE ? (int) contentLengthLong : -1;
-    }
-
-    @Override
-    public long getContentLengthLong() {
-        try {
-            connect();
-            return size;
-        } catch (IOException e) {
-            return -1;
-        }
-    }
-
-    @Override
-    public String getContentType() {
-        return "x-java/jar";
-    }
-
-    @Override
-    public long getLastModified() {
-        if (lastModified == -1) {
-            try {
-                lastModified = Files.getLastModifiedTime(location.getPath()).toMillis();
-            } catch (IOException e) {
-                lastModified = 0;
-            }
-        }
-        return lastModified;
     }
 
     @Override
@@ -133,16 +138,26 @@ public class NestedURLConnection extends URLConnection {
         if (connected) {
             return;
         }
-
-        ZipContent zipContent = ZipContent.open(location.getPath(), location.getNestedEntryName());
-
-
+        URL parentJarFileUrl = location.getPath().toUri().toURL();
+        JarFile parentJarFile = jarFiles.getOrCreate(getUseCaches(), parentJarFileUrl);
+        jarFiles.cacheIfAbsent(getUseCaches(), parentJarFileUrl, parentJarFile);
+        JarEntry nestedJarEntry = parentJarFile
+                .stream()
+                .filter(entry -> entry.getName().endsWith(location.getNestedEntryName()))
+                .findFirst()
+                .orElseThrow();
+        length = nestedJarEntry.getSize();
+        lastModified = nestedJarEntry.getTime();
+        inputStream = parentJarFile.getInputStream(nestedJarEntry);
         connected = true;
     }
 
     @Override
     public InputStream getInputStream() throws IOException {
         connect();
-        return super.getInputStream();
+        if (inputStream == null) {
+            throw new IOException("Jar file not found: " + getURL());
+        }
+        return inputStream;
     }
 }

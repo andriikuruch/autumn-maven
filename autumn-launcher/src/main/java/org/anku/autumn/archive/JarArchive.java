@@ -5,16 +5,15 @@ import org.anku.autumn.net.protocol.jar.JarUrl;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
-import java.util.LinkedHashSet;
 import java.util.Set;
-import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
+import java.util.stream.Collectors;
 
-public class JarArchive implements Archive {
+public class JarArchive implements Archive, AutoCloseable {
 
     private final File file;
-    private final JarFile jarFile;
+    public final JarFile jarFile;
 
     public JarArchive(File file) throws IOException {
         this.file = file;
@@ -28,18 +27,13 @@ public class JarArchive implements Archive {
 
     @Override
     public Set<URL> getClassPathUrls() {
-        Set<URL> urls = new LinkedHashSet<>();
-        urls.add(JarUrl.create(file, "BOOT-INF/classes/"));
-        jarFile
+        Set<URL> urls = jarFile
                 .stream()
-                .filter(this::isLibrary)
+                .filter(jarEntry -> jarEntry.getName().startsWith("BOOT-INF/")
+                        && jarEntry.getName().endsWith(".jar"))
                 .map(jarEntry -> JarUrl.create(file, jarEntry))
-                .forEach(urls::add);
+                .collect(Collectors.toSet());
         return urls;
-    }
-
-    private boolean isLibrary(JarEntry jarEntry) {
-        return jarEntry.getName().startsWith("BOOT-INF/libs");
     }
 
     @Override
