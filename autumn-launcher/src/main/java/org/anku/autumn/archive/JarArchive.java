@@ -29,8 +29,9 @@ public class JarArchive implements Archive, AutoCloseable {
     public Set<URL> getClassPathUrls() {
         Set<URL> urls = jarFile
                 .stream()
-                .filter(jarEntry -> jarEntry.getName().startsWith("BOOT-INF/")
-                        && jarEntry.getName().endsWith(".jar"))
+                .filter(jarEntry -> jarEntry.getName().startsWith("BOOT-INF/libs/")
+                        && jarEntry.getName().endsWith(".jar")
+                        || jarEntry.getName().equals("BOOT-INF/classes/"))
                 .map(jarEntry -> JarUrl.create(file, jarEntry))
                 .collect(Collectors.toSet());
         return urls;
