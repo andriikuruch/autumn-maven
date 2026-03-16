@@ -47,7 +47,7 @@
         </dependency>
 
         <dependency>
-            <groupId>org.anku</groupId>
+            <groupId>com.github.andriikuruch.autumn-maven</groupId>
             <artifactId>autumn-launcher</artifactId>
             <version>${project.version}</version>
         </dependency>
