@@ -16,13 +16,17 @@ public class JarFileFactory {
     private JarFile parentJarFile;
 
     public JarFile createJarFile(URL url, Consumer<JarFile> onCloseCallback) throws IOException {
-        if (fatJarFileUrl.getPath().equals(url.getPath()) || url.getProtocol().equals("file")) {
+        if (url.getProtocol().equals("file")) {
             try {
                 CacheAwareJarFile cacheAwareJarFile = new CacheAwareJarFile(Path.of(url.toURI()).toFile(), onCloseCallback);
-                if (parentJarFile == null) {
-                    parentJarFile = cacheAwareJarFile;
-                }
                 return cacheAwareJarFile;
+            } catch (URISyntaxException e) {
+                throw new IOException(e.getCause());
+            }
+        }
+        if (parentJarFile == null) {
+            try {
+                parentJarFile = new CacheAwareJarFile(Path.of(fatJarFileUrl.toURI()).toFile(), onCloseCallback);
             } catch (URISyntaxException e) {
                 throw new IOException(e.getCause());
             }
@@ -33,6 +37,9 @@ public class JarFileFactory {
                 .filter(entry -> url.getPath().endsWith(entry.getName())) // url.getPath = /path/myjar.jar/!BOOT-INF/lib/mylib.jar
                 .findFirst()
                 .orElseThrow();
+        if (nestedJarEntry.getName().equals("BOOT-INF/classes/")) {
+            return parentJarFile;
+        }
         try (InputStream inputStream = parentJarFile.getInputStream(nestedJarEntry)) {
             Path path = Files.createTempFile("jar-unpacked", null);
             Files.copy(inputStream, path, StandardCopyOption.REPLACE_EXISTING);
