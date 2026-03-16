@@ -6,8 +6,10 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.JarURLConnection;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.file.Path;
 import java.security.Permission;
 import java.util.Collections;
 import java.util.List;
@@ -67,6 +69,13 @@ final class JarUrlConnection extends JarURLConnection {
             return null;
         }
         JarEntry entry = jarFile.getJarEntry(entryName);
+        try {
+            if (Path.of(getClass().getProtectionDomain().getCodeSource().getLocation().toURI()).toFile().toString().equals(jarFile.getName())) {
+                entry = jarFile.getJarEntry("BOOT-INF/classes/" + entryName);
+            }
+        } catch (URISyntaxException e) {
+            // don't do anything
+        }
         if (entry == null) {
             jarFiles.closeIfNotCached(jarFileURL, jarFile);
             throw new FileNotFoundException("Jar entry " + entryName + " not found in " + jarFile.getName());
