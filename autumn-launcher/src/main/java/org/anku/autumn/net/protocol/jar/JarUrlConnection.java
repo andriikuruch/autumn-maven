@@ -1,7 +1,8 @@
 package org.anku.autumn.net.protocol.jar;
 
-import java.io.BufferedInputStream;
+
 import java.io.FileNotFoundException;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.JarURLConnection;
@@ -15,51 +16,21 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
 final class JarUrlConnection extends JarURLConnection {
-
-    private static final UrlJarFiles jarFiles = new UrlJarFiles();
-
-    private URLConnection jarFileConnection;
+    private static final String CONTENT_TYPE = "x-java/jar";
+    private static final String UNKNOWN_CONTENT = "content/unknown";
+    private final JarFiles jarFiles = JarFiles.instance;
+    private final String entryName;
+    private String contentType;
     private JarFile jarFile;
     private JarEntry jarEntry;
-    private String entryName;
-    private boolean connected;
-    private String contentType;
+    private URLConnection jarFileURLConnection;
+
 
     JarUrlConnection(URL url) throws IOException {
         super(url);
         entryName = getEntryName();
-        jarFileConnection = getJarFileURL().openConnection();
-        jarFileConnection.setUseCaches(this.getUseCaches());
-    }
-
-    public static URLConnection open(URL u) throws IOException {
-        return new JarUrlConnection(u);
-    }
-
-    @Override
-    public void connect() throws IOException {
-        if (connected) {
-            return;
-        }
-        jarFile = jarFiles.getOrCreate(getUseCaches(), getJarFileURL());
-        jarEntry = getJarEntry(getJarFileURL());
-        boolean addedToCache = jarFiles.cacheIfAbsent(getUseCaches(), getJarFileURL(), jarFile);
-        if (addedToCache) {
-            jarFileConnection = jarFiles.reconnect(jarFile, jarFileConnection);
-        }
-        connected = true;
-    }
-
-    private JarEntry getJarEntry(URL jarFileURL) throws IOException {
-        if (entryName == null) {
-            return null;
-        }
-        JarEntry jarEntry = jarFile.getJarEntry(entryName);
-        if (jarEntry == null) {
-            jarFiles.closeIfNotCached(jarFileURL, jarFile);
-            throw new FileNotFoundException("Jar entry %s% not found in %s%".formatted(entryName, jarFile.getName()));
-        }
-        return jarEntry;
+        jarFileURLConnection = getJarFileURL().openConnection();
+        jarFileURLConnection.setUseCaches(useCaches);
     }
 
     @Override
@@ -75,45 +46,82 @@ final class JarUrlConnection extends JarURLConnection {
     }
 
     @Override
-    public Permission getPermission() throws IOException {
-        return jarFileConnection != null
-                ? jarFileConnection.getPermission()
-                : null;
+    public void connect() throws IOException {
+        if (connected) {
+            return;
+        }
+        URL jarFileURL = getJarFileURL(); // nested:/path/myjar.jar/!BOOT-INF/lib/mylib.jar
+        jarFile = jarFiles.getOrCreate(getUseCaches(), jarFileURL);
+        jarEntry = getJarEntry(jarFileURL);
+        boolean cached = jarFiles.cacheIfAbsent(getUseCaches(), jarFileURL, jarFile);
+        if (cached) {
+            boolean useCaches = jarFileURLConnection.getUseCaches();
+            jarFileURLConnection = jarFiles.reconnect(jarFile, jarFileURLConnection);
+            jarFileURLConnection.setUseCaches(useCaches);
+        }
+        connected = true;
+    }
+
+    private JarEntry getJarEntry(URL jarFileURL) throws IOException {
+        if (entryName == null) {
+            return null;
+        }
+        JarEntry entry = jarFile.getJarEntry(entryName);
+        if (entry == null) {
+            jarFiles.closeIfNotCached(jarFileURL, jarFile);
+            throw new FileNotFoundException("Jar entry " + entryName + " not found in " + jarFile.getName());
+        }
+        return entry;
     }
 
     @Override
     public InputStream getInputStream() throws IOException {
         connect();
-        if (entryName == null && !UrlJarFileFactory.isNestedUrl(getJarFileURL())) {
+        String entryName = getEntryName();
+        if (entryName == null) {
             throw new IOException("no entry name specified");
         }
         if (jarEntry == null) {
-            if (jarFile instanceof NestedJarFile nestedJarFile) {
-                return nestedJarFile.getRawZipDataInputStream();
-            }
-            throw new FileNotFoundException("JAR entry " + entryName +
-                    " not found in " +
-                    jarFile.getName());
+            throw new FileNotFoundException("Jar entry " + entryName + " not found in " + jarFile.getName());
         }
-        return new JarURLInputStream(jarFile.getInputStream(jarEntry));
+
+        return new ConnectionInputStream(jarFile.getInputStream(jarEntry));
+    }
+
+    class ConnectionInputStream extends FilterInputStream {
+
+        protected ConnectionInputStream(InputStream in) {
+            super(in);
+        }
+
+        @Override
+        public void close () throws IOException {
+            try {
+                super.close();
+            } finally {
+                if (!getUseCaches()) {
+                    jarFile.close();
+                }
+            }
+        }
+    }
+
+    @Override
+    public Permission getPermission() throws IOException {
+        return jarFileURLConnection != null ? jarFileURLConnection.getPermission() : null;
     }
 
     @Override
     public int getContentLength() {
         long length = getContentLengthLong();
-        if (length > Integer.MAX_VALUE) {
-            return -1;
-        }
-        return (int) length;
+        return length <= Integer.MAX_VALUE ? (int) length : -1;
     }
 
     @Override
     public long getContentLengthLong() {
         try {
             connect();
-            return jarEntry != null
-                    ? jarEntry.getSize()
-                    : jarFileConnection != null ? jarFileConnection.getContentLengthLong() : -1;
+            return jarEntry != null ? jarEntry.getSize() : jarFileURLConnection.getContentLengthLong();
         } catch (IOException e) {
             return -1;
         }
@@ -122,179 +130,104 @@ final class JarUrlConnection extends JarURLConnection {
     @Override
     public Object getContent() throws IOException {
         connect();
-        return entryName != null
-                ? super.getContent()
-                : jarFile;
+        return entryName != null ? super.getContent() : jarFile;
     }
 
     @Override
     public String getContentType() {
         if (contentType != null) {
-            return contentType;
-        }
-        if (entryName == null) {
-            contentType = "x-java/jar";
-            return contentType;
-        }
-        try {
-            connect();
-            try (InputStream inputStream = jarFile.getInputStream(jarEntry)) {
-                contentType = guessContentTypeFromStream(new BufferedInputStream(inputStream));
-                if (contentType != null) {
-                    return contentType;
+            String entryName = getEntryName();
+            if (entryName == null) {
+                contentType = CONTENT_TYPE;
+            } else {
+                try {
+                    connect();
+                    InputStream inputStream = jarFile.getInputStream(jarEntry);
+                    contentType = URLConnection.guessContentTypeFromStream(inputStream);
+                    inputStream.close();
+                } catch (IOException e) {
+                    // don't do anything
                 }
             }
-        } catch (Exception e) {
-            return null;
+            if (contentType == null) {
+                contentType = URLConnection.guessContentTypeFromName(entryName);
+            }
+            if (contentType == null) {
+                contentType =  UNKNOWN_CONTENT;
+            }
         }
-        contentType = guessContentTypeFromName(entryName);
-        return contentType != null
-                ? contentType
-                : "content/unknown";
+        return contentType;
     }
 
     @Override
     public String getHeaderField(String name) {
-        return jarFileConnection != null
-                ? jarFileConnection.getHeaderField(name)
-                : null;
-    }
-
-    @Override
-    public void setRequestProperty(String key, String value) {
-        if (jarFileConnection != null) {
-            jarFileConnection.setRequestProperty(key, value);
-        }
+        return jarFileURLConnection != null ? jarFileURLConnection.getHeaderField(name) : null;
     }
 
     @Override
     public String getRequestProperty(String key) {
-        return jarFileConnection != null
-                ? jarFileConnection.getRequestProperty(key)
-                : null;
+        return jarFileURLConnection != null ? jarFileURLConnection.getRequestProperty(key) : null;
+    }
+
+    @Override
+    public void setRequestProperty(String key, String value) {
+        if (jarFileURLConnection != null) {
+            jarFileURLConnection.setRequestProperty(key, value);
+        }
     }
 
     @Override
     public void addRequestProperty(String key, String value) {
-        if (jarFileConnection != null) {
-            jarFileConnection.addRequestProperty(key, value);
+        if (jarFileURLConnection != null) {
+            jarFileURLConnection.addRequestProperty(key, value);
         }
     }
 
     @Override
     public Map<String, List<String>> getRequestProperties() {
-        return jarFileConnection != null
-                ? jarFileConnection.getRequestProperties()
-                : Collections.emptyMap();
-    }
-
-    @Override
-    public void setAllowUserInteraction(boolean allowuserinteraction) {
-        if (jarFileConnection != null) {
-            jarFileConnection.setAllowUserInteraction(allowUserInteraction);
-        }
+        return jarFileURLConnection != null ? jarFileURLConnection.getRequestProperties() : Collections.emptyMap();
     }
 
     @Override
     public boolean getAllowUserInteraction() {
-        return jarFileConnection != null && jarFileConnection.getAllowUserInteraction();
+        return jarFileURLConnection != null && jarFileURLConnection.getAllowUserInteraction();
     }
 
     @Override
-    public void setUseCaches(boolean usecaches) {
-        if (jarFileConnection != null) {
-            jarFileConnection.setUseCaches(useCaches);
+    public void setAllowUserInteraction(boolean allowuserinteraction) {
+        if (jarFileURLConnection != null) {
+            jarFileURLConnection.setAllowUserInteraction(allowuserinteraction);
         }
     }
 
     @Override
     public boolean getUseCaches() {
-        return jarFileConnection != null && jarFileConnection.getUseCaches();
+        return jarFileURLConnection != null && jarFileURLConnection.getUseCaches();
     }
 
     @Override
-    public long getLastModified() {
-        return jarFileConnection != null
-                ? jarFileConnection.getLastModified()
-                : super.getLastModified();
-    }
-
-    @Override
-    public void setIfModifiedSince(long ifmodifiedsince) {
-        if (jarFileConnection != null) {
-            jarFileConnection.setIfModifiedSince(ifModifiedSince);
+    public void setUseCaches(boolean usecaches) {
+        if (jarFileURLConnection != null) {
+            jarFileURLConnection.setUseCaches(usecaches);
         }
     }
 
     @Override
-    public void setDefaultUseCaches(boolean defaultusecaches) {
-        if (jarFileConnection != null) {
-            jarFileConnection.setDefaultUseCaches(defaultusecaches);
+    public void setIfModifiedSince(long ifmodifiedsince) {
+        if (jarFileURLConnection != null) {
+            jarFileURLConnection.setIfModifiedSince(ifmodifiedsince);
         }
     }
 
     @Override
     public boolean getDefaultUseCaches() {
-        return jarFileConnection != null && jarFileConnection.getUseCaches();
+        return jarFileURLConnection != null && jarFileURLConnection.getDefaultUseCaches();
     }
 
-    private class JarURLInputStream extends InputStream {
-        private volatile InputStream inputStream;
-
-        public JarURLInputStream(InputStream inputStream) {
-            super();
-            this.inputStream = inputStream;
-        }
-
-        @Override
-        public int read() throws IOException {
-            return inputStream.read();
-        }
-
-        @Override
-        public int read(byte[] b) throws IOException {
-            return inputStream.read(b);
-        }
-
-        @Override
-        public int read(byte[] b, int off, int len) throws IOException {
-            return inputStream.read(b, off, len);
-        }
-
-        @Override
-        public long skip(long n) throws IOException {
-            return inputStream.skip(n);
-        }
-
-        @Override
-        public int available() throws IOException {
-            return inputStream.available();
-        }
-
-        @Override
-        public boolean markSupported() {
-            return inputStream.markSupported();
-        }
-
-        @Override
-        public synchronized void mark(int readLimit) {
-            inputStream.mark(readLimit);
-        }
-
-        @Override
-        public synchronized void reset() throws IOException {
-            inputStream.reset();
-        }
-
-        @Override
-        public void close() throws IOException {
-            try {
-                inputStream.close();
-            } finally {
-                if (!getUseCaches()) {
-                    JarUrlConnection.this.jarFile.close();
-                }
-            }
+    @Override
+    public void setDefaultUseCaches(boolean defaultusecaches) {
+        if (jarFileURLConnection != null) {
+            jarFileURLConnection.setDefaultUseCaches(defaultusecaches);
         }
     }
 }

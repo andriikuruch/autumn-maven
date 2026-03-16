@@ -10,7 +10,7 @@ import java.security.CodeSource;
 import java.util.Set;
 import java.util.jar.Manifest;
 
-public interface Archive extends AutoCloseable {
+public interface Archive {
 
     Manifest getManifest() throws IOException;
 
@@ -28,7 +28,4 @@ public interface Archive extends AutoCloseable {
         }
         return new JarArchive(targetFile);
     }
-
-    @Override
-    default void close() throws Exception { }
 }

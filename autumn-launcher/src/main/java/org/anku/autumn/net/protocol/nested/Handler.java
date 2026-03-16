@@ -1,6 +1,5 @@
 package org.anku.autumn.net.protocol.nested;
 
-import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URL;
 import java.net.URLConnection;
@@ -16,23 +15,7 @@ public class Handler extends URLStreamHandler {
 
     @Override
     protected URLConnection openConnection(URL u) {
-//        return new NestedURLConnection(u);
-        System.out.println(" URL: " + u);
-        System.out.println("  Handler invoked!");
-        System.out.println("  Protocol: " + u.getProtocol());
-        System.out.println("  Path: " + u.getPath());
-        System.out.println("  File: " + u.getFile());
-        System.out.println("  Host: " + u.getHost());
-        System.out.println("  Authority: " + u.getAuthority());
-        System.out.println("  Query: " + u.getQuery());
-        System.out.println("  Ref: " + u.getRef());
-
-        return new URLConnection(u) {
-            @Override
-            public void connect() throws IOException {
-                System.out.println("  connect() called");
-            }
-        };
+        return new NestedUrlConnection(u);
     }
 
     public static void assertUrlIsNotMalformed(String url) {
