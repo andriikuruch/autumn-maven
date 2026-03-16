@@ -3,37 +3,33 @@
 ### Step 1. Add the JitPack repository to your build file
 
 ###### For Maven
+```xml
+<pluginRepositories>
+	<pluginRepository>
+			<id>jitpack.io</id>
+		<url>https://jitpack.io</url>
+	</pluginRepository>
+</pluginRepositories>
 ```
-<repositories>
-		<repository>
-		    <id>jitpack.io</id>
-		    <url>https://jitpack.io</url>
-		</repository>
-	</repositories>
-```
-###### For Gradle
-```
-	dependencyResolutionManagement {
-		repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-		repositories {
-			mavenCentral()
-			maven { url 'https://jitpack.io' }
-		}
-	}
-```
+
 ### Step 2. Add the dependency
 
 ###### For Maven
-```
-	<dependency>
-	    <groupId>com.github.andriikuruch</groupId>
-	    <artifactId>autumn-maven</artifactId>
-	    <version>Tag</version>
-	</dependency>
-```
-###### For Gradle
-```
-dependencies {
-	        implementation 'com.github.andriikuruch:autumn-maven:Tag'
-	}
+```xml
+<build>
+	<plugins>
+		<plugin>
+			<groupId>com.github.andriikuruch.autumn-maven</groupId>
+			<artifactId>autumn-maven-plugin</artifactId>
+			<version>1.0.2</version> <!-- change it with higher version if you need. see tags here https://github.com/andriikuruch/autumn-maven/tags -->
+			<executions>
+				<execution>
+					<goals>
+						<goal>repackage</goal>
+					</goals>
+				</execution>
+			</executions>
+		</plugin>
+	</plugins>
+</build>
 ```
