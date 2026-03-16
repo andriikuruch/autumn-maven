@@ -21,7 +21,7 @@
 		<plugin>
 			<groupId>com.github.andriikuruch.autumn-maven</groupId>
 			<artifactId>autumn-maven-plugin</artifactId>
-			<version>1.0.2</version> <!-- change it with higher version if you need. see tags here https://github.com/andriikuruch/autumn-maven/tags -->
+			<version>1.0.2</version> <!-- change it with higher version if you need. see versions here https://github.com/andriikuruch/autumn-maven/tags -->
 			<executions>
 				<execution>
 					<goals>
