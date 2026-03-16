@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.github.andriikuruch.autumn-maven</groupId>
         <artifactId>autumn-maven</artifactId>
-        <version>1.0.3</version>
+        <version>1.0.5</version>
     </parent>
 
     <artifactId>autumn-maven-plugin</artifactId>
